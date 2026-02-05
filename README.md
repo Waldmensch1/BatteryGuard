@@ -22,6 +22,7 @@ ESP32-based BLE monitor for up to 4 Battery Guard devices simultaneously. Suppor
 
 - [PlatformIO](https://platformio.org/) (VS Code extension or CLI)
 - [NimBLE-Arduino](https://github.com/h2zero/NimBLE-Arduino) library (auto-installed)
+- AES key, hardcoded in App. Decompile the Android APK to find it
 
 ## Quick Start
 
@@ -49,8 +50,8 @@ const DeviceConfig DEVICES[] = {
 ```
 
 **Finding your device MAC:**
-- Check the Battery Guard app
-- Or enable debug mode (see below) and check serial output for discovered devices
+- it is printed on device
+- Enter the correct AES key. Otherwise BLE communication wont work.
 
 ### 3. Build and Upload
 

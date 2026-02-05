@@ -116,8 +116,8 @@ Monitoring 1 device(s):
 [Main Battery] Connected successfully!
 [Main Battery] Handshake complete, waiting for notifications...
 
-Main Battery (50547B815AFB): 11.99V | 42% | 23°C | normal
-Main Battery (50547B815AFB): 11.98V | 41% | 23°C | normal
+Main Battery (50547B815AFB): 11.99V | 42% | 23°C | normal | VRise:0 | VDrop:2
+Main Battery (50547B815AFB): 11.98V | 41% | 23°C | normal | VRise:0 | VDrop:2
 ```
 
 ### Debug Mode
@@ -168,11 +168,26 @@ All writes use AES-128-CBC encryption with static key.
 
 ### Data Format
 
-Notifications arrive every ~1 second:
-- **Voltage:** 0.01V resolution (uint16 / 100)
-- **SOC:** 0-100% (uint8)
-- **Temperature:** °C (int8)
-- **Status:** normal, low, critical, charging
+Notifications arrive every ~1 second (16-byte encrypted, AES-128-CBC):
+
+**Plaintext Structure (from Android app analysis):**
+
+| Byte | Field | Description | Format |
+|------|-------|-------------|--------|
+| 0-2 | Header | Command header | `0xD1 0x55 0x07` |
+| 3 | Temp Sign | Temperature sign | `1` = negative, else positive |
+| 4 | Temperature | Temperature value | Signed integer in °C |
+| 5 | Status | Device status | `0x00`=normal, `0x01`=low, `0x02`=engine off, `0x03`=charging |
+| 6 | SOC | State of Charge | 0-100% (uint8) |
+| 7-8 | Voltage | Battery voltage | Big-endian uint16, divide by 100 for volts |
+| 9-10 | VRise | Rapid voltage rise events | Big-endian uint16, counts alternator starts |
+| 11-12 | VDrop | Rapid voltage drop events | Big-endian uint16, counts heavy loads/engine off |
+| 13-15 | Padding | Unused | Not parsed |
+
+**Voltage Event Counters:**
+- **VRise** tracks rapid voltage increases (alternator starts, charging begins)
+- **VDrop** tracks rapid voltage drops (starter motor, engine off, heavy loads)
+- These counters help identify battery health issues and usage patterns
 
 ## Troubleshooting
 

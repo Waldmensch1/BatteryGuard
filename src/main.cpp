@@ -99,6 +99,8 @@ public:
     uint8_t soc;
     int8_t temperature;
     uint8_t status;
+    uint16_t rapidVoltageRise;  // Rapid voltage rise event counter (e.g., alternator starts)
+    uint16_t rapidVoltageDrop;  // Rapid voltage drop event counter (e.g., heavy load, engine off)
     unsigned long lastUpdateTime;
     
     BatteryMonitor() :
@@ -107,7 +109,8 @@ public:
         state(STATE_DISCONNECTED), connectRetries(0), 
         lastRetryTime(0), lastNotificationTime(0), stateEnterTime(0),
         deviceAddress(NimBLEAddress("")),
-        voltage(0), soc(0), temperature(0), status(0), 
+        voltage(0), soc(0), temperature(0), status(0),
+        rapidVoltageRise(0), rapidVoltageDrop(0),
         lastUpdateTime(0) {}
     
     void init(uint8_t index, const DeviceConfig* cfg) {
@@ -309,26 +312,38 @@ void notifyCallback(NimBLERemoteCharacteristic* pChar, uint8_t* pData, size_t le
         return;
     }
     
-    // Parse data
-    monitor->temperature = (int8_t)decrypted[4];
+    // Parse data (based on Android app analysis)
+    // Byte 3: Temperature sign (1 = negative)
+    // Byte 4: Temperature value
+    if (decrypted[3] == 1) {
+        monitor->temperature = -(int8_t)decrypted[4];
+    } else {
+        monitor->temperature = (int8_t)decrypted[4];
+    }
+    
     monitor->status = decrypted[5];
     monitor->soc = decrypted[6];
     monitor->voltage = ((decrypted[7] << 8) | decrypted[8]) / 100.0f;
+    monitor->rapidVoltageRise = (decrypted[9] << 8) | decrypted[10];
+    monitor->rapidVoltageDrop = (decrypted[11] << 8) | decrypted[12];
     monitor->lastUpdateTime = millis();
     monitor->lastNotificationTime = millis();
     
-    // Status string
+    // Status string (from Android app analysis)
     const char* statusStr = "unknown";
     switch (monitor->status) {
         case 0x00: statusStr = "normal"; break;
         case 0x01: statusStr = "low"; break;
-        case 0x02: statusStr = "charging"; break;
+        case 0x02: statusStr = "engine off"; break;
+        case 0x03: statusStr = "charging"; break;
+        default: statusStr = "unknown"; break;
     }
     
-    // Log output
-    Serial.printf("%s (%s): %.2fV | %d%% | %d°C | %s\n",
+    // Log output with extended data
+    Serial.printf("%s (%s): %.2fV | %d%% | %d°C | %s | VRise:%d | VDrop:%d\n",
         monitor->config->name, monitor->config->serial,
-        monitor->voltage, monitor->soc, monitor->temperature, statusStr);
+        monitor->voltage, monitor->soc, monitor->temperature, statusStr,
+        monitor->rapidVoltageRise, monitor->rapidVoltageDrop);
 }
 
 // ============================================================================

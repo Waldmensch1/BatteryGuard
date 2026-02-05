@@ -1,0 +1,74 @@
+/**
+ * Battery Guard Multi-Device Monitor - Configuration Template
+ * 
+ * INSTRUCTIONS:
+ * 1. Copy this file to config.h
+ * 2. Fill in your device details below
+ * 3. config.h is git-ignored for security
+ */
+
+#ifndef CONFIG_H
+#define CONFIG_H
+
+#include <Arduino.h>
+#include "types.h"
+
+// ============================================================================
+// AES Encryption Key (Static - same for all devices)
+// ============================================================================
+// CHANGE THIS: Replace with your actual AES key
+const uint8_t AES_KEY[16] = {
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+
+// ============================================================================
+// Device Configuration (Up to 4 devices)
+// ============================================================================
+const DeviceConfig DEVICES[] = {
+    {
+        .serial = "XXXXXXXXXXXX",           // CHANGE: Your device MAC without colons
+        .name = "Battery #1",
+        .type = LEAD_ACID,
+        .enabled = true
+    },
+    {
+        .serial = "XXXXXXXXXXXX",
+        .name = "Battery #2",
+        .type = AGM,
+        .enabled = false
+    },
+    {
+        .serial = "XXXXXXXXXXXX",
+        .name = "Battery #3",
+        .type = LEAD_ACID,
+        .enabled = false
+    },
+    {
+        .serial = "XXXXXXXXXXXX",
+        .name = "Battery #4",
+        .type = AGM,
+        .enabled = false
+    }
+};
+
+const uint8_t DEVICE_COUNT = sizeof(DEVICES) / sizeof(DEVICES[0]);
+
+// ============================================================================
+// BLE Configuration
+// ============================================================================
+const uint32_t SCAN_INTERVAL = 100;         // Scan interval in 0.625ms units (62.5ms)
+const uint32_t SCAN_WINDOW = 80;            // Scan window in 0.625ms units (50ms)
+const uint32_t SCAN_DURATION = 5;           // Scan duration in seconds (0 = continuous)
+
+const uint32_t CONNECT_TIMEOUT_MS = 10000;  // Connection timeout (10 seconds)
+const uint8_t MAX_CONNECT_RETRIES = 3;      // Retry attempts before cooldown
+const uint32_t RETRY_COOLDOWN_MS = 30000;   // Cooldown after failed retries (30 seconds)
+
+// ============================================================================
+// Monitoring Configuration
+// ============================================================================
+const uint32_t NOTIFICATION_TIMEOUT_MS = 60000;  // Notification timeout (60 seconds)
+const uint32_t RECONNECT_DELAY_MS = 2000;        // Delay before reconnect attempt (2 seconds)
+
+#endif // CONFIG_H

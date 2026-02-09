@@ -6,3 +6,7 @@
 
 # Config file with actual device data
 include/config.h
+
+# Development helpers
+.upload_procedure.md
+test/lcd_test.cpp

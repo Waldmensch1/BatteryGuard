@@ -1,14 +1,16 @@
 # Battery Guard Multi-Device Monitor
 
-ESP32-based BLE monitor for up to 4 Battery Guard devices simultaneously. Supports automatic device discovery, encrypted communication, and real-time battery monitoring.
+ESP32-based BLE monitor for up to 4 Battery Guard devices simultaneously with optional 1.8" ST7735 LCD display. Supports automatic device discovery, encrypted communication, and real-time battery monitoring.
 
 ## Features
 
 - ✅ **Multi-Device Support** - Monitor up to 4 Battery Guard devices in parallel
+- ✅ **LCD Display** - 1.8" ST7735 TFT display with auto-rotate every 15 seconds
 - ✅ **Automatic Discovery** - Continuously scans for devices as they come and go
 - ✅ **Auto-Reconnection** - Automatically reconnects when devices power cycle
 - ✅ **Encrypted Communication** - AES-128-CBC handshake protocol
 - ✅ **Real-time Monitoring** - Voltage, State of Charge (SOC), Temperature, Status
+- ✅ **Progress Bar Display** - Visual SOC representation on LCD
 - ✅ **Retry Logic** - 3 connection attempts with 30-second cooldown period
 - ✅ **Clean Output** - Production mode with optional debug logging
 
@@ -16,7 +18,20 @@ ESP32-based BLE monitor for up to 4 Battery Guard devices simultaneously. Suppor
 
 - **ESP32 Development Board** (tested with DOIT ESP32 DEVKIT V1)
 - **Battery Guard BLE Device(s)** (50:54:7B:XX:XX:XX)
+- **Optional: 1.8" ST7735 LCD Display** (128x160 pixels, SPI interface)
 - USB cable for programming
+
+### LCD Wiring (Optional)
+
+| ST7735 Pin | ESP32 Pin |
+|------------|-----------|
+| VCC        | 3.3V      |
+| GND        | GND       |
+| CS         | GPIO 5    |
+| RST        | GPIO 4    |
+| DC         | GPIO 2    |
+| MOSI       | GPIO 23   |
+| SCLK       | GPIO 18   |
 
 ## Software Requirements
 
@@ -55,14 +70,24 @@ const DeviceConfig DEVICES[] = {
 
 ### 3. Build and Upload
 
-**Production mode (clean output):**
+**Production mode (no LCD):**
 ```bash
 platformio run -e release --target upload
 ```
 
-**Debug mode (detailed logging):**
+**Production mode with LCD:**
+```bash
+platformio run -e release-lcd --target upload
+```
+
+**Debug mode (detailed logging, no LCD):**
 ```bash
 platformio run -e debug --target upload
+```
+
+**Debug mode with LCD:**
+```bash
+platformio run -e debug-lcd --target upload
 ```
 
 ### 4. Monitor Serial Output
@@ -70,6 +95,26 @@ platformio run -e debug --target upload
 ```bash
 platformio device monitor -b 115200
 ```
+
+## LCD Display
+
+When using the `release-lcd` or `debug-lcd` environment, the ST7735 display shows:
+
+**Startup Screen:**
+- "Battery" / "Guard" (2 lines)
+- "Connecting...." below
+
+**Data Screen** (per device):
+- **Header**: Device name (blue background)
+- **Voltage**: Large green text (e.g., "10.99 V")
+- **SOC**: Progress bar + percentage
+- **Temperature**: Centered (e.g., "Temperature 23 C")
+- **Status**: Centered, yellow text (e.g., "Charge: off", "Charge: on")
+
+**Auto-Rotation:**
+- Switches between connected devices every 15 seconds
+- Shows only connected devices
+- Returns to startup screen when all devices disconnect
 
 ## Configuration
 
@@ -177,7 +222,7 @@ Notifications arrive every ~1 second (16-byte encrypted, AES-128-CBC):
 | 0-2 | Header | Command header | `0xD1 0x55 0x07` |
 | 3 | Temp Sign | Temperature sign | `1` = negative, else positive |
 | 4 | Temperature | Temperature value | Signed integer in °C |
-| 5 | Status | Device status | `0x00`=normal, `0x01`=low, `0x02`=engine off, `0x03`=charging |
+| 5 | Status | Charging status | `0x01`=Charge off (≤13.3V), `0x02`=Charge on (>13.3V), `0x00`=Unknown (not observed) |
 | 6 | SOC | State of Charge | 0-100% (uint8) |
 | 7-8 | Voltage | Battery voltage | Big-endian uint16, divide by 100 for volts |
 | 9-10 | VRise | Rapid voltage rise events | Big-endian uint16, counts alternator starts |
@@ -188,6 +233,26 @@ Notifications arrive every ~1 second (16-byte encrypted, AES-128-CBC):
 - **VRise** tracks rapid voltage increases (alternator starts, charging begins)
 - **VDrop** tracks rapid voltage drops (starter motor, engine off, heavy loads)
 - These counters help identify battery health issues and usage patterns
+
+### Status Byte Interpretation (Empirically Validated)
+
+Based on extensive testing comparing device logs with the official Android app:
+
+| Voltage | Official App Display | Byte[5] Value | Our Display |
+|---------|----------------------|---------------|-------------|
+| 10.99V | "Batterie in Ordnung" | 0x01 | Charge: off |
+| 12.00V | "Batterie in Ordnung" | 0x01 | Charge: off |
+| 13.10V | "Batterie in Ordnung" | 0x01 | Charge: off |
+| 13.49V | "Ladevorgang" | 0x02 | Charge: on |
+| 14.01V | "Ladevorgang" | 0x02 | Charge: on |
+
+**Key Findings:**
+- **Threshold**: Status changes at ~13.3V (observed transition between 13.17V and 13.33V)
+- **Only 2 values observed**: 0x01 (motor off) and 0x02 (charging detected)
+- **0x00 never observed** in real-world testing across multiple voltage ranges
+- **Status represents charging state, NOT battery health**: The device does not send "low battery" warnings
+- The official app calculates battery health warnings based on voltage/SOC, not the status byte
+- Raw data is preserved for MQTT integration; downstream applications should perform health calculations
 
 ## Troubleshooting
 
@@ -233,18 +298,54 @@ Notifications arrive every ~1 second (16-byte encrypted, AES-128-CBC):
 - Flash size: ~603KB
 - `platformio run -e debug --target upload`
 
+### All PlatformIO Build Targets
+
+| Environment      | LCD Display | Debug Logging | MQTT Support | Typical Use                |
+|-----------------|-------------|---------------|--------------|----------------------------|
+| release         | No          | No            | No           | Production, no LCD         |
+| release-lcd     | Yes         | No            | No           | Production, with LCD       |
+| debug           | No          | Yes           | No           | Debugging, no LCD          |
+| debug-lcd       | Yes         | Yes           | No           | Debugging, with LCD        |
+| release-mqtt    | No          | No            | Yes          | Production, MQTT           |
+| debug-mqtt      | No          | Yes           | Yes          | Debugging, MQTT            |
+
+**Descriptions:**
+- **release**: Minimal output, no LCD, no MQTT. Fastest and smallest build for normal use.
+- **release-lcd**: Enables LCD display (ST7735), no debug, no MQTT. For visual monitoring.
+- **debug**: Enables verbose serial logging for troubleshooting, no LCD, no MQTT.
+- **debug-lcd**: LCD + debug logging. For debugging with visual feedback.
+- **release-mqtt**: Enables MQTT support for remote monitoring/logging, no LCD, no debug.
+- **debug-mqtt**: MQTT + debug logging. For troubleshooting MQTT integration.
+
+**How to build/upload:**
+```bash
+platformio run -e <environment> --target upload
+```
+Replace `<environment>` with one of the above (e.g., `release-lcd`).
+
+See `platformio.ini` for all build flags and dependencies per environment.
+
 ## File Structure
 
 ```
 Battery Guard Demo/
 ├── include/
-│   ├── config.h           # Your device configuration (git-ignored)
-│   ├── config.h.sample    # Template for config.h
-│   └── types.h            # Battery type definitions
+│   ├── battery_monitor.h      # Battery monitoring interface
+│   ├── config.h              # Your device configuration (git-ignored)
+│   ├── config.h.sample       # Template for config.h
+│   ├── mqtt_client.h         # MQTT client interface
+│   ├── tft_display.h         # LCD display interface
+│   ├── types.h               # Battery type definitions
+│   └── README                # Info (can be deleted)
+├── lib/
+│   └── README                # Info (can be deleted)
 ├── src/
-│   └── main.cpp           # Main application code
-├── platformio.ini         # Build configuration
-└── README.md              # This file
+│   ├── main.cpp              # Main application code
+│   ├── mqtt_client.cpp       # MQTT client implementation
+│   └── tft_display.cpp       # LCD display implementation
+├── LICENSE                   # Project license
+├── platformio.ini            # Build configuration
+├── README.md                 # Project documentation
 ```
 
 ## Technical Details
@@ -268,3 +369,25 @@ This is a demo/research project for Battery Guard BLE protocol reverse engineeri
 ## Credits
 
 Based on protocol analysis of the Battery Guard mobile application and BLE packet captures.
+
+## Home Assistant Integration
+
+This project supports automatic sensor discovery in Home Assistant via MQTT. When enabled, the firmware publishes sensor configuration messages so Home Assistant can automatically create battery sensors for each device.
+
+**How to enable:**
+- In `include/config.h`, uncomment the line:
+  ```cpp
+  #define HOMEASSIST_FORMAT
+  ```
+- Ensure your MQTT broker is accessible from Home Assistant.
+
+**Features:**
+- Auto-registers voltage, SOC, temperature, and status sensors for each battery
+- No manual YAML configuration required
+- Topics follow the format: `<MQTT_PREFIX>/batteryguard/<mqttName>`
+
+**Example:**
+- Voltage sensor for battery1: `home/batteries/batteryguard/battery1/voltage`
+- SOC sensor for battery2: `home/batteries/batteryguard/battery2/soc`
+
+See `config.h.sample` for details and options.

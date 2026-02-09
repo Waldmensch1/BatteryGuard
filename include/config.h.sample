@@ -29,30 +29,56 @@ const DeviceConfig DEVICES[] = {
     {
         .serial = "XXXXXXXXXXXX",           // CHANGE: Your device MAC without colons
         .name = "Battery #1",
+        .mqttName = "battery1",             // MQTT topic name (no spaces, lowercase recommended)
         .type = LEAD_ACID,
         .enabled = true
     },
     {
         .serial = "XXXXXXXXXXXX",
         .name = "Battery #2",
+        .mqttName = "battery2",
         .type = AGM,
         .enabled = false
     },
     {
         .serial = "XXXXXXXXXXXX",
         .name = "Battery #3",
+        .mqttName = "battery3",
         .type = LEAD_ACID,
         .enabled = false
     },
     {
         .serial = "XXXXXXXXXXXX",
         .name = "Battery #4",
+        .mqttName = "battery4",
         .type = AGM,
         .enabled = false
     }
 };
 
 const uint8_t DEVICE_COUNT = sizeof(DEVICES) / sizeof(DEVICES[0]);
+
+// ============================================================================
+// MQTT Configuration (Only for release-mqtt/debug-mqtt builds)
+// ============================================================================
+#define WIFI_SSID "your_wifi_ssid"              // CHANGE: Your WiFi SSID
+#define WIFI_PASSWORD "your_wifi_password"      // CHANGE: Your WiFi password
+
+#define MQTT_SERVER "192.168.1.100"             // CHANGE: Your MQTT broker IP/hostname
+#define MQTT_PORT 1883                          // MQTT broker port (usually 1883)
+// #define MQTT_USERNAME "username"             // Uncomment if authentication required
+// #define MQTT_PASSWORD "password"             // Uncomment if authentication required
+
+#define MQTT_PREFIX "home/batteries"            // CHANGE: Your MQTT topic prefix
+                                                // Full topic: <prefix>/batteryguard/<mqttName>
+                                                // Example: home/batteries/batteryguard/battery1
+
+#define MQTT_UPDATE_INTERVAL 60                 // Update interval in seconds (default: 60)
+#define MQTT_RETAINED false                     // Retain MQTT messages (true/false)
+
+// Home Assistant Auto-Discovery
+// Enable this to automatically register sensors in Home Assistant
+#define HOMEASSIST_FORMAT                       // Uncomment to enable Home Assistant discovery
 
 // ============================================================================
 // BLE Configuration

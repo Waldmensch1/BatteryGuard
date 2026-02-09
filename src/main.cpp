@@ -15,6 +15,16 @@
 #include <NimBLEDevice.h>
 #include <mbedtls/aes.h>
 #include "config.h"
+#include "types.h"
+#include "battery_monitor.h"
+
+#ifdef LCD_ENABLED
+  #include "tft_display.h"
+#endif
+
+#ifdef MQTT_ENABLED
+  #include "mqtt_client.h"
+#endif
 
 // Debug mode controlled by platformio.ini build flags
 #ifndef DEBUG_MODE
@@ -51,115 +61,6 @@ static const NimBLEUUID CHAR_NOTIFY_UUID("0000fff4-0000-1000-8000-00805f9b34fb")
 // ============================================================================
 // Device State Machine
 // ============================================================================
-enum DeviceState {
-    STATE_DISCONNECTED,     // Not connected
-    STATE_SCANNING,         // Searching for device
-    STATE_CONNECTING,       // Establishing connection
-    STATE_HANDSHAKE,        // Sending handshake
-    STATE_MONITORING,       // Receiving data
-    STATE_COOLDOWN          // Waiting after failed retries
-};
-
-const char* stateToString(DeviceState state) {
-    switch(state) {
-        case STATE_DISCONNECTED: return "DISCONNECTED";
-        case STATE_SCANNING: return "SCANNING";
-        case STATE_CONNECTING: return "CONNECTING";
-        case STATE_HANDSHAKE: return "HANDSHAKE";
-        case STATE_MONITORING: return "MONITORING";
-        case STATE_COOLDOWN: return "COOLDOWN";
-        default: return "UNKNOWN";
-    }
-}
-
-// ============================================================================
-// Device Monitor Instance
-// ============================================================================
-class BatteryMonitor {
-public:
-    // Configuration
-    uint8_t configIndex;
-    const DeviceConfig* config;
-    
-    // BLE
-    NimBLEClient* pClient;
-    NimBLERemoteCharacteristic* pWriteChar;
-    NimBLERemoteCharacteristic* pNotifyChar;
-    
-    // State
-    DeviceState state;
-    uint8_t connectRetries;
-    unsigned long lastRetryTime;
-    unsigned long lastNotificationTime;
-    unsigned long stateEnterTime;  // When we entered current state
-    NimBLEAddress deviceAddress;  // Store discovered device address
-    
-    // Data
-    float voltage;
-    uint8_t soc;
-    int8_t temperature;
-    uint8_t status;
-    uint16_t rapidVoltageRise;  // Rapid voltage rise event counter (e.g., alternator starts)
-    uint16_t rapidVoltageDrop;  // Rapid voltage drop event counter (e.g., heavy load, engine off)
-    unsigned long lastUpdateTime;
-    
-    BatteryMonitor() :
-        configIndex(0), config(nullptr), pClient(nullptr), 
-        pWriteChar(nullptr), pNotifyChar(nullptr),
-        state(STATE_DISCONNECTED), connectRetries(0), 
-        lastRetryTime(0), lastNotificationTime(0), stateEnterTime(0),
-        deviceAddress(NimBLEAddress("")),
-        voltage(0), soc(0), temperature(0), status(0),
-        rapidVoltageRise(0), rapidVoltageDrop(0),
-        lastUpdateTime(0) {}
-    
-    void init(uint8_t index, const DeviceConfig* cfg) {
-        configIndex = index;
-        config = cfg;
-        state = STATE_DISCONNECTED;
-        connectRetries = 0;
-        
-        Serial.printf("[%s] Initialized: %s (Type: 0x%02X)\n", 
-            config->name, config->serial, config->type);
-    }
-    
-    String getMacAddress() {
-        String mac = config->serial;
-        // Convert "50547B815AFB" to "50:54:7B:81:5A:FB"
-        String formatted = "";
-        for (int i = 0; i < 12; i += 2) {
-            if (i > 0) formatted += ":";
-            formatted += mac.substring(i, i + 2);
-        }
-        return formatted;
-    }
-    
-    void cleanup() {
-        if (pClient) {
-            if (pClient->isConnected()) {
-                pClient->disconnect();
-            }
-            NimBLEDevice::deleteClient(pClient);
-            pClient = nullptr;
-        }
-        pWriteChar = nullptr;
-        pNotifyChar = nullptr;
-        state = STATE_DISCONNECTED;
-    }
-    
-    bool isInCooldown() {
-        if (state == STATE_COOLDOWN) {
-            if (millis() - lastRetryTime >= RETRY_COOLDOWN_MS) {
-                connectRetries = 0;
-                state = STATE_DISCONNECTED;
-                return false;
-            }
-            return true;
-        }
-        return false;
-    }
-};
-
 // ============================================================================
 // Global Variables
 // ============================================================================
@@ -167,6 +68,11 @@ BatteryMonitor monitors[4];
 uint8_t activeMonitorCount = 0;
 NimBLEScan* pBLEScan;
 bool scanningActive = false;
+
+#ifdef LCD_ENABLED
+  // Display data for each monitor (shared with display task)
+  DeviceDisplayData g_displayData[MAX_MONITORS];
+#endif
 
 // ============================================================================
 // AES Encryption/Decryption
@@ -305,6 +211,16 @@ void notifyCallback(NimBLERemoteCharacteristic* pChar, uint8_t* pData, size_t le
     }
     DEBUG_PRINTLN("");
     
+    // Skip first 5 notifications (contain invalid data like 61°C)
+    monitor->notifyCount++;
+    if (monitor->notifyCount <= 5) {
+        DEBUG_TIMESTAMP();
+        DEBUG_PRINTF("[%s] Skipping notification #%d (first 5 contain invalid data)\n", 
+            monitor->config->name, monitor->notifyCount);
+        monitor->lastNotificationTime = millis();  // Update to prevent timeout
+        return;
+    }
+    
     // Verify header
     if (decrypted[0] != 0xD1 || decrypted[1] != 0x55) {
         DEBUG_TIMESTAMP();
@@ -329,21 +245,43 @@ void notifyCallback(NimBLERemoteCharacteristic* pChar, uint8_t* pData, size_t le
     monitor->lastUpdateTime = millis();
     monitor->lastNotificationTime = millis();
     
-    // Status string (from Android app analysis)
-    const char* statusStr = "unknown";
-    switch (monitor->status) {
-        case 0x00: statusStr = "normal"; break;
-        case 0x01: statusStr = "low"; break;
-        case 0x02: statusStr = "engine off"; break;
-        case 0x03: statusStr = "charging"; break;
-        default: statusStr = "unknown"; break;
-    }
+    // ALWAYS log parsed bytes for debugging status issues
+    Serial.printf("[PARSE] %s: Byte[4]=Temp:%d°C | Byte[5]=Status:0x%02X(%s) | Byte[6]=SOC:%d%% | Byte[7-8]=V:%.2f | Byte[9-10]=VRise:%d | Byte[11-12]=VDrop:%d\n",
+        monitor->config->name,
+        monitor->temperature, 
+        decrypted[5], getBatteryStatusText(monitor->status),
+        monitor->soc,
+        monitor->voltage,
+        monitor->rapidVoltageRise,
+        monitor->rapidVoltageDrop);
     
-    // Log output with extended data
+    // Summary log output
     Serial.printf("%s (%s): %.2fV | %d%% | %d°C | %s | VRise:%d | VDrop:%d\n",
         monitor->config->name, monitor->config->serial,
-        monitor->voltage, monitor->soc, monitor->temperature, statusStr,
+        monitor->voltage, monitor->soc, monitor->temperature, getBatteryStatusText(monitor->status),
         monitor->rapidVoltageRise, monitor->rapidVoltageDrop);
+    
+    // Update display data
+    #ifdef LCD_ENABLED
+        int monitorIndex = -1;
+        for (int i = 0; i < activeMonitorCount; i++) {
+            if (&monitors[i] == monitor) {
+                monitorIndex = i;
+                break;
+            }
+        }
+        
+        if (monitorIndex >= 0 && monitorIndex < MAX_MONITORS) {
+            g_displayData[monitorIndex].active = true;
+            g_displayData[monitorIndex].connected = (monitor->state == STATE_MONITORING);
+            strncpy(g_displayData[monitorIndex].name, monitor->config->name, sizeof(g_displayData[monitorIndex].name) - 1);
+            g_displayData[monitorIndex].voltage = monitor->voltage;
+            g_displayData[monitorIndex].soc = monitor->soc;
+            g_displayData[monitorIndex].temperature = monitor->temperature;
+            g_displayData[monitorIndex].status = monitor->status;
+            g_displayData[monitorIndex].lastUpdate = millis();
+        }
+    #endif
 }
 
 // ============================================================================
@@ -500,6 +438,7 @@ bool connectToDevice(BatteryMonitor* monitor, NimBLEAdvertisedDevice* device) {
     // Success - reset retry counter
     monitor->connectRetries = 0;
     monitor->state = STATE_HANDSHAKE;
+    monitor->notifyCount = 0;  // Reset notification counter
     DEBUG_TIMESTAMP();
     DEBUG_PRINTF("[%s] State -> HANDSHAKE\n", monitor->config->name);
     
@@ -601,6 +540,20 @@ void setup() {
     Serial.println("Battery Guard Multi-Device Monitor");
     Serial.println("============================================================");
     
+    // Initialize display data
+    #ifdef LCD_ENABLED
+        for (int i = 0; i < MAX_MONITORS; i++) {
+            g_displayData[i].active = false;
+            g_displayData[i].connected = false;
+            g_displayData[i].voltage = 0.0f;
+            g_displayData[i].soc = 0;
+            g_displayData[i].temperature = 0;
+            g_displayData[i].status = 0;
+            g_displayData[i].lastUpdate = 0;
+            strcpy(g_displayData[i].name, "");
+        }
+    #endif
+    
     // Initialize BLE
     NimBLEDevice::init("ESP32-Monitor");
     NimBLEDevice::setPower(ESP_PWR_LVL_P9);
@@ -629,6 +582,23 @@ void setup() {
     
     Serial.println("============================================================\n");
     
+    // Initialize LCD display
+    #ifdef LCD_ENABLED
+        Serial.println("[LCD] Starting display task...");
+        startDisplayTask();
+        Serial.println("[LCD] Display task started");
+    #endif
+    
+    // Initialize MQTT client
+    #ifdef MQTT_ENABLED
+        Serial.println("[MQTT] Initializing MQTT client...");
+        if (mqttClient.begin()) {
+            Serial.println("[MQTT] MQTT client initialized successfully");
+        } else {
+            Serial.println("[MQTT] MQTT client initialization failed!");
+        }
+    #endif
+    
     // Start scanning
     pBLEScan->start(0, false);
     scanningActive = true;
@@ -643,6 +613,7 @@ void loop() {
     bool needToConnect = false;
     
     // Debug: Show all monitor states every 5 seconds
+    #ifdef DEBUG_MODE
     static unsigned long lastStateDebug = 0;
     if (now - lastStateDebug > 5000) {
         DEBUG_TIMESTAMP();
@@ -654,6 +625,7 @@ void loop() {
             needToConnect, scanningActive, pBLEScan->isScanning());
         lastStateDebug = now;
     }
+    #endif
     
     for (int i = 0; i < activeMonitorCount; i++) {
         BatteryMonitor* monitor = &monitors[i];
@@ -750,6 +722,7 @@ void loop() {
                 Serial.printf("[%s] Connected successfully!\n", monitor->config->name);
                 monitor->connectRetries = 0;
                 monitor->state = STATE_HANDSHAKE;
+                monitor->notifyCount = 0;  // Reset notification counter
                 delay(100);
                 sendHandshake(monitor);
             }
@@ -781,6 +754,11 @@ void loop() {
                 }
             }
         }
+        
+        // Publish MQTT data if enabled (check all monitors, regardless of state)
+        #ifdef MQTT_ENABLED
+            mqttClient.publishBatteryData(monitor);
+        #endif
     }
     
     // Keep scanningActive flag in sync with actual scan state
@@ -790,13 +768,35 @@ void loop() {
         scanningActive = false;
     }
     
-    // Restart scan if not active and not connecting
-    if (!needToConnect && !scanningActive) {
+    // Check if ALL enabled devices are in MONITORING state
+    bool allMonitoring = true;
+    for (int i = 0; i < activeMonitorCount; i++) {
+        if (monitors[i].state != STATE_MONITORING) {
+            allMonitoring = false;
+            break;
+        }
+    }
+    
+    // Stop scan only if ALL devices are monitoring (Multi-Device Support)
+    if (allMonitoring && scanningActive) {
+        DEBUG_TIMESTAMP();
+        DEBUG_PRINTLN("All devices monitoring, stopping scan");
+        pBLEScan->stop();
+        scanningActive = false;
+    }
+    
+    // Restart scan if not all devices are connected and not currently connecting
+    if (!needToConnect && !scanningActive && !allMonitoring) {
         DEBUG_TIMESTAMP();
         DEBUG_PRINTLN("Restarting scan...");
         pBLEScan->start(0, false);
         scanningActive = true;
     }
+    
+    // Update MQTT client
+    #ifdef MQTT_ENABLED
+        mqttClient.loop();
+    #endif
     
     delay(100);
 }

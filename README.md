@@ -59,6 +59,7 @@ const DeviceConfig DEVICES[] = {
     {
         .serial = "50547B815AFB",    // Your device MAC (no colons)
         .name = "Main Battery",
+        .mqttName = "battery1",             // MQTT topic name (no spaces, lowercase recommended)
         .type = LEAD_ACID,           // or AGM, LITHIUM, etc.
         .enabled = true
     },

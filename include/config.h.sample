@@ -17,7 +17,15 @@
 // AES Encryption Key (Static - same for all devices)
 // ============================================================================
 // CHANGE THIS: Replace with your actual AES key
-const uint8_t AES_KEY[16] = {
+
+// intAct Battery Guard, BM6
+const uint8_t AES_KEY_1[16] = {
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+
+// Ancel BM300 pro Key, BM2
+const uint8_t AES_KEY_2[16] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
@@ -31,28 +39,32 @@ const DeviceConfig DEVICES[] = {
         .name = "Battery #1",
         .mqttName = "battery1",             // MQTT topic name (no spaces, lowercase recommended)
         .type = LEAD_ACID,
-        .enabled = true
+        .enabled = true,
+        .key = AES_KEY_1
     },
     {
         .serial = "XXXXXXXXXXXX",
         .name = "Battery #2",
         .mqttName = "battery2",
         .type = AGM,
-        .enabled = false
+        .enabled = false,
+        .key = AES_KEY_1
     },
     {
         .serial = "XXXXXXXXXXXX",
         .name = "Battery #3",
         .mqttName = "battery3",
         .type = LEAD_ACID,
-        .enabled = false
+        .enabled = false,
+        .key = AES_KEY_1
     },
     {
         .serial = "XXXXXXXXXXXX",
         .name = "Battery #4",
         .mqttName = "battery4",
         .type = AGM,
-        .enabled = false
+        .enabled = false,
+        .key = AES_KEY_1
     }
 };
 

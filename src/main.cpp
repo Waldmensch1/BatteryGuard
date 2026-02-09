@@ -77,24 +77,24 @@ bool scanningActive = false;
 // ============================================================================
 // AES Encryption/Decryption
 // ============================================================================
-void aes_encrypt(const uint8_t* input, uint8_t* output) {
+void aes_encrypt(const uint8_t* input, uint8_t* output, const uint8_t* key) {
     uint8_t iv_copy[16];
     memcpy(iv_copy, AES_IV, 16);  // Make a copy since CBC modifies IV
     
     mbedtls_aes_context aes;
     mbedtls_aes_init(&aes);
-    mbedtls_aes_setkey_enc(&aes, AES_KEY, 128);
+    mbedtls_aes_setkey_enc(&aes, key, 128);
     mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_ENCRYPT, 16, iv_copy, input, output);
     mbedtls_aes_free(&aes);
 }
 
-void aes_decrypt(const uint8_t* input, uint8_t* output) {
+void aes_decrypt(const uint8_t* input, uint8_t* output, const uint8_t* key) {
     uint8_t iv_copy[16];
     memcpy(iv_copy, AES_IV, 16);  // Make a copy since CBC modifies IV
     
     mbedtls_aes_context aes;
     mbedtls_aes_init(&aes);
-    mbedtls_aes_setkey_dec(&aes, AES_KEY, 128);
+    mbedtls_aes_setkey_dec(&aes, key, 128);
     mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_DECRYPT, 16, iv_copy, input, output);
     mbedtls_aes_free(&aes);
 }
@@ -131,7 +131,7 @@ void sendHandshake(BatteryMonitor* monitor) {
     // Encrypt and send each command
     for (int i = 0; i < 6; i++) {
         uint8_t encrypted[16];
-        aes_encrypt(commands[i], encrypted);
+        aes_encrypt(commands[i], encrypted, monitor->config->key);
         
         DEBUG_TIMESTAMP();
         DEBUG_PRINTF("[%s] Write #%d plaintext: ", monitor->config->name, i + 1);
@@ -202,7 +202,7 @@ void notifyCallback(NimBLERemoteCharacteristic* pChar, uint8_t* pData, size_t le
     
     // Decrypt notification
     uint8_t decrypted[16];
-    aes_decrypt(pData, decrypted);
+    aes_decrypt(pData, decrypted, monitor->config->key);
     
     DEBUG_TIMESTAMP();
     DEBUG_PRINTF("[%s] Decrypted: ", monitor->config->name);

@@ -71,6 +71,7 @@ struct DeviceConfig {
     const char* mqttName;       // MQTT topic name (e.g., "main_battery")
     BatteryType type;           // Battery type (LEAD_ACID or AGM for automatic mode)
     bool enabled;               // Enable monitoring for this device
+    const uint8_t* key;         // Pointer to AES key for this device
 };
 
 // ============================================================================

@@ -2,6 +2,8 @@
 
 ESP32-based BLE monitor for up to 4 Battery Guard devices simultaneously with optional 1.8" ST7735 LCD display. Supports automatic device discovery, encrypted communication, and real-time battery monitoring.
 
+![Demo](docs/IMG_8282.jpg)
+
 ## Features
 
 - ✅ **Multi-Device Support** - Monitor up to 4 Battery Guard devices in parallel

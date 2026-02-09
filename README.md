@@ -39,7 +39,9 @@ ESP32-based BLE monitor for up to 4 Battery Guard devices simultaneously with op
 
 - [PlatformIO](https://platformio.org/) (VS Code extension or CLI)
 - [NimBLE-Arduino](https://github.com/h2zero/NimBLE-Arduino) library (auto-installed)
-- AES key, hardcoded in App. Decompile the Android APK to find it
+- AES key, hardcoded in App. Decompile the Android APK to find it or look into following pages
+- [useful Page for BM2, Ancel 300 pro and derivates](https://haxrob.net/bm2-reversing-the-ble-protocol-of-the-bm2-battery-monitor/)
+- [useful page for BM6, intAct Battery Guard and compatible](https://www.tarball.ca/posts/reverse-engineering-the-bm6-ble-battery-monitor/)
 
 ## Quick Start
 
